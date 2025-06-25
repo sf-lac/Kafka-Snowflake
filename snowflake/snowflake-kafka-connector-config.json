@@ -1,0 +1,26 @@
+{
+  "name": "snowflake-kafka-yahoo-finance-connector",
+  "config": {
+    "connector.class": "com.snowflake.kafka.connector.SnowflakeSinkConnector",
+    "tasks.max": "1",
+    "topics": "yahoo-finance-topic",
+
+    "snowflake.url.name": "*****-*****.snowflakecomputing.com:443",
+    "snowflake.user.name": "kafka_connector_user",
+    "snowflake.private.key": "MIIEuwIBADANBgkqhkiG9w0BAQEFAASCBK...",
+    "snowflake.database.name": "KAFKA_STREAMING",
+    "snowflake.schema.name": "YAHOO_FINANCE",
+    "snowflake.table.name": "stock_prices",
+    "snowflake.role.name": "kafka_role",
+
+    "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false",
+
+    "buffer.count.records": "1000",
+    "buffer.flush.time": "10",
+    "buffer.size.bytes": "5000000",
+
+    "behavior.on.null.values": "IGNORE"
+  }
+}
