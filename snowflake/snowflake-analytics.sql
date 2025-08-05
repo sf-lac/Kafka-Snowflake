@@ -2,7 +2,7 @@ USE ROLE ACCOUNTADMIN;
 USE DATABASE KAFKA_STREAMING;
 USE SCHEMA YAHOO_FINANCE;
 
--- Latest price per symbol
+-- Latest Price
 CREATE OR REPLACE VIEW vw_latest_stock_prices AS
 SELECT symbol, price, time
 FROM (
@@ -12,39 +12,39 @@ FROM (
 )
 WHERE rn = 1;
 
--- Moving average (5-minute)
-CREATE OR REPLACE VIEW vw_5min_moving_avg AS
-SELECT 
-  symbol,
-  DATE_TRUNC('minute', time::TIMESTAMP_NTZ) AS minute_bucket,
-  AVG(price) AS avg_price_5min
-FROM stock_prices
-WHERE time::TIMESTAMP_NTZ >= DATEADD(HOUR, -1, CURRENT_TIMESTAMP)
-GROUP BY symbol, minute_bucket;
-
-
--- Price spike/dip detection (5% deviation from 5-row moving avg)
-CREATE OR REPLACE VIEW vw_price_anomalies AS
+-- 5-Min Moving Average
+CREATE OR REPLACE DYNAMIC TABLE dt_moving_avg
+TARGET_LAG = '1 minute'
+WAREHOUSE = COMPUTE_WH
+AS
 WITH recent AS (
-  SELECT symbol, price, time,
-         AVG(price) OVER (PARTITION BY symbol ORDER BY time ROWS BETWEEN 4 PRECEDING AND CURRENT ROW) AS moving_avg
+  SELECT 
+    symbol,
+    DATE_TRUNC('minute', time::TIMESTAMP_NTZ) AS minute_bucket,    
+    AVG(price) OVER (PARTITION BY symbol ORDER BY minute_bucket ROWS BETWEEN 4 PRECEDING AND CURRENT ROW) AS avg_price_5min
+  FROM stock_prices
+)
+SELECT *
+FROM recent;
+
+-- Price Anomalies
+CREATE OR REPLACE DYNAMIC TABLE dt_price_anomalies
+TARGET_LAG = '1 minute'
+WAREHOUSE = COMPUTE_WH
+AS
+WITH recent AS (
+  SELECT 
+    symbol,
+    price,
+    time,
+    AVG(price) OVER (PARTITION BY symbol ORDER BY time ROWS BETWEEN 4 PRECEDING AND CURRENT ROW) AS moving_avg
   FROM stock_prices
 )
 SELECT *
 FROM recent
 WHERE ABS(price - moving_avg) / NULLIF(moving_avg, 0) > 0.05;
 
--- Hourly trend (avg price)
-CREATE OR REPLACE VIEW vw_hourly_avg_prices AS
-SELECT 
-  symbol,
-  DATE_TRUNC('hour', time::TIMESTAMP_NTZ) AS hour_bucket,
-  AVG(price) AS avg_price_hour
-FROM stock_prices
-WHERE time::TIMESTAMP_NTZ >= DATEADD(DAY, -1, CURRENT_TIMESTAMP)
-GROUP BY symbol, hour_bucket;
-
--- Stock leaderboard by latest price
+-- Leaderboard by Latest Price
 CREATE OR REPLACE VIEW vw_price_leaderboard AS
 SELECT symbol, price, RANK() OVER (ORDER BY price DESC) AS price_rank
 FROM (
@@ -53,4 +53,24 @@ FROM (
   QUALIFY ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY time DESC) = 1
 );
 
-SELECT * FROM vw_5min_moving_avg LIMIT 10;
+SHOW DYNAMIC TABLES;
+
+SELECT *
+FROM TABLE(
+  INFORMATION_SCHEMA.DYNAMIC_TABLE_REFRESH_HISTORY(
+    NAME => 'KAFKA_STREAMING.YAHOO_FINANCE.dt_moving_avg',
+    RESULT_LIMIT => 20
+  )
+)
+ORDER BY DATA_TIMESTAMP DESC;
+
+SELECT *
+FROM TABLE(
+  INFORMATION_SCHEMA.DYNAMIC_TABLE_REFRESH_HISTORY(
+    NAME => 'KAFKA_STREAMING.YAHOO_FINANCE.dt_price_anomalies',
+    RESULT_LIMIT => 20
+  )
+)
+ORDER BY DATA_TIMESTAMP DESC;
+
+
